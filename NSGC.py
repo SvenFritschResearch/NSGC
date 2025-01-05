@@ -232,7 +232,7 @@ def get_motor_commands_from_geo_numerical_solution(numerical_solution, X_d_hat_a
     #print("theta: ", np.rad2deg(theta), "deg")
     #print("delta_l_niTi compensated: ", compensated_delta_l_niTi, "mm")
 
-    return l_r, delta_l_niti #compensated_robotic_length, compensated_delta_l_niTi
+    return compensated_robotic_length, compensated_delta_l_niTi
 
 
 
@@ -248,8 +248,7 @@ if __name__ == "__main__":
     x_t_hat = np.sqrt(x_t**2 + y_t**2)  # target position in the rotated coordinate system
     print("x_t_hat: ", x_t_hat)
     alpha = np.arctan2(y_t, x_t) 
-    print("alpha: ", np.rad2deg(alpha))
-
+    
     X_e_hat, _, numerical_solution = solve_equ(z_t, x_t_hat, psi_t, comments = False)
     if X_e_hat[0] == 0 and X_e_hat[1] == 0 and X_e_hat[2] == 0: #if there in no numerical solution
         print("x_t_hat is made negative ---------------------------------------------------------------")
@@ -257,11 +256,11 @@ if __name__ == "__main__":
         psi_t = -psi_t
         X_e_hat, _, numerical_solution = solve_equ(z_t, x_t_hat, psi_t, comments = False)
         X_e_geo = np.array([X_e_hat[1]*np.cos(alpha+np.pi), X_e_hat[1]*np.sin(alpha+np.pi), X_e_hat[0], X_e_hat[2]]) #rotate back to the original coordinate system
-
+        alpha = alpha + np.pi
     else:
         X_e_geo = np.array([X_e_hat[1]*np.cos(alpha), X_e_hat[1]*np.sin(alpha), X_e_hat[0], X_e_hat[2]])
     
-
+    print("alpha: ", np.rad2deg(alpha))
     print("X_d_hat: ", z_t, x_t_hat, np.rad2deg(psi_t))
     print("X_e_hat: ", X_e_hat[0], X_e_hat[1], np.rad2deg(X_e_hat[2]))
     print("X_d: ", X_d[0], X_d[1], X_d[2], np.rad2deg(X_d[3]))
