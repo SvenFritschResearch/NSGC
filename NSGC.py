@@ -2,15 +2,162 @@ from scipy.optimize import fsolve
 import numpy as np
 import time
 import warnings
+import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d.art3d import Poly3DCollection
+import os
+
+def plot_func(fk, desired_pose=None, plot_cube=False, image_number=None):
+    #fk is a list of transformation matices starting at the base
+
+    x_list = [mat[0,3] for mat in fk]
+    y_list = [mat[1,3] for mat in fk]
+    z_list = [mat[2,3] for mat in fk]
+  
+    fig = plt.figure(figsize = (10, 7))
+    ax = plt.axes(projection ="3d")
+    ax.scatter3D(0,0,0, color = "green", marker="^", label = "robot base", s=50)
+    ax.plot(x_list, y_list, z_list, color = "chocolate", marker=".", label = "NSGC result")
+
+    if desired_pose is not None :
+        ax.scatter3D(desired_pose[0], desired_pose[1], desired_pose[2], color="red", marker="x", label="target pose", s=50)
+    
+    if plot_cube == True:
+        z = [-25, 25]
+        y = [-25, 25]
+        x = [250, 280]
+
+        # Create cube vertices
+        vertices = [
+            [x[0], y[0], z[0]],
+            [x[1], y[0], z[0]],
+            [x[1], y[1], z[0]],
+            [x[0], y[1], z[0]],
+            [x[0], y[0], z[1]],
+            [x[1], y[0], z[1]],
+            [x[1], y[1], z[1]],
+            [x[0], y[1], z[1]],
+        ]
+
+        # Define cube faces using vertex indices
+        faces = [
+            [vertices[0], vertices[1], vertices[2], vertices[3]],  # bottom
+            [vertices[4], vertices[5], vertices[6], vertices[7]],  # top
+            [vertices[0], vertices[1], vertices[5], vertices[4]],  # front
+            [vertices[2], vertices[3], vertices[7], vertices[6]],  # back
+            [vertices[1], vertices[2], vertices[6], vertices[5]],  # right
+            [vertices[4], vertices[7], vertices[3], vertices[0]],  # left
+        ]
+
+        cube = Poly3DCollection(faces, linewidths=1, edgecolors='black', alpha=0.2)
+        cube.set_facecolor('cyan')
+        ax.add_collection3d(cube)
+
+    # horizontal line along X axis
+    x_line = np.linspace(0, 500, 100)
+    y_line = np.full_like(x_line, 0)
+    z_line = np.full_like(x_line, 0)
+    ax.plot(x_line, y_line, z_line, color='black', linestyle='--', linewidth=1, label="robot's main axis")
 
 
-def solve_equ(z_T, x_T_hat, psi,  comments = False):
+    ax.axes.set_xlim3d(left=0, right=600) 
+    ax.axes.set_ylim3d(bottom=-300, top=300) 
+    ax.axes.set_zlim3d(bottom=-300, top=300)
+    ax.set_xlabel('Z Axis [mm]')
+    ax.set_ylabel('Y Axis [mm]')
+    y_ticks = ax.get_yticks()
+    ax.set_yticklabels([f"{-int(tick):d}" for tick in y_ticks])
+    ax.set_zlabel('X Axis [mm]')
+    ax.view_init(elev=20, azim=-45)
+    ax.set_box_aspect([1, 1, 1])
+    ax.set_title('Gallbladder endoscopy with NSGC in 3D', fontsize=16)
 
     
+    
+    ax.legend()
+    #plt.show()
+    image_directory = r"C:\Dateien\3_ProTUTech_WiMi\Paper 2\Python_code\simulated_use_plot_folder"
+    file_name = f"plot_{image_number}.png"
+    full_file_path = os.path.join(image_directory, file_name)
+    dpi = 300
+    fig.savefig(full_file_path, dpi=dpi)
+    plt.close()
+
+
+def forward_kinematics_3D(robot_parameters):
+    alpha, theta, robotic_length, delta_l_niTi = robot_parameters
+    
+    # Design parameters
+    len_distal_part = 130 #mm
+    len_enddisk = 46 #mm
+    len_wrist = 42 #mm
+    dist_tendons= 9.7 #mm
+
+    T_list = []
+
+     #it always does the translation first, and then the last point of the translation is rotated about the angle.
+
+    T_list.append(np.array([[1, 0            , 0             , 0      ],
+                            [0, np.cos(alpha), -np.sin(alpha), 0      ],
+                            [0, np.sin(alpha), np.cos(alpha) , 0      ],
+                            [0, 0            , 0             , 1      ]])) 
+  
+    # transformation matrix for rotation about the z-axis
+    def calculate_segment_transform(angle, length):
+        return np.array([[np.cos(angle), -np.sin(angle), 0, length],
+                         [np.sin(angle), np.cos(angle) , 0, 0     ],
+                         [0            , 0             , 1, 0     ],
+                         [0            , 0             , 0, 1     ]])
+    
+    
+    T_list.append(calculate_segment_transform(theta, 0))
+
+    T_list.append(calculate_segment_transform(np.deg2rad(-90), len_distal_part)) #-90deg to make the robot come out in a perpendicular fashion
+    
+    def forward_kinematics_CR_3D(l_right, l_left, dist_tendons):
+        gamma = ((l_right-l_left) * 180)/(np.pi * dist_tendons) #in deg
+        l = (l_right+l_left)/2 
+        r = l * 180/(np.pi * gamma)
+
+        kappa = 1/r
+
+        T_CR = np.array([[np.cos(kappa*l),-np.sin(kappa*l), 0, 1/kappa * (np.cos(kappa * l)-1) ],
+                        [np.sin(kappa*l) , np.cos(kappa*l), 0, 1/kappa * np.sin(kappa * l)     ],
+                        [0               , 0              , 1, 0                               ],
+                        [0               , 0              , 0, 1                               ]])
+        
+        return T_CR
+
+    resolution = 100
+    for i in range (resolution):
+        T_list.append(forward_kinematics_CR_3D(robotic_length/resolution, (robotic_length+delta_l_niTi)/resolution, dist_tendons))
+
+   
+    T_list.append(calculate_segment_transform(np.deg2rad(90), 0))
+    T_list.append(calculate_segment_transform(np.deg2rad(0), len_enddisk + len_wrist)) 
+
+
+    T_sum_list = [T_list[0]]
+    for i in range(1,len(T_list)):
+        T_sum_list.append(np.dot(T_sum_list[-1],T_list[i]))
+
+    return T_sum_list
+
+
+def plot_3D(X_t, robot_parameters,image_number): 
+    #robot_parameters = np.array([alpha, theta, l_r, delta_l_niti])
+    fk = forward_kinematics_3D(robot_parameters)
+    X_t_rearranged = np.array([X_t[2], X_t[0], X_t[1]])  # rearranging to match the forward kinematics output
+    plot_func(fk, desired_pose=X_t_rearranged, plot_cube=True, image_number=image_number)
+
+
+def NSGC(z_T, x_T_hat, psi, comments = False):
+
+    
+    # Check if the bending is upwards or downwards
     theta_straight_config = np.arctan(x_T_hat/z_T)  # for straight configuration
    
     # Design parameters
-    l_e = 88 # length of wrist
+    l_w = 88 # length of wrist
     l_d = 130 # length of distal part
     MAX_THETA = np.deg2rad(60)  # Upper limit for theta
     MIN_THETA = 0               # Lower limit for theta
@@ -27,7 +174,7 @@ def solve_equ(z_T, x_T_hat, psi,  comments = False):
         z_e_hat = z_T
         x_e_hat = x_T_hat
         X_e_hat = [z_e_hat, x_e_hat, psi-np.deg2rad(angle_threshold_straight)] #worst case: psi is 4deg smaller than theta_straight_config
-        end_time = time.time()  # Zeitmessung beenden
+        end_time = time.time() 
         numerical_solution = [0,0,0,0]
         return X_e_hat , end_time - start_time, numerical_solution 
 
@@ -37,9 +184,9 @@ def solve_equ(z_T, x_T_hat, psi,  comments = False):
         if comments: print("Upwards bending")
         def equations(vars):
             z_0, x_0_hat, theta, r = vars
-            eq1 = r**2 -(z_T-l_e*np.cos(psi)-z_0)**2 - (x_0_hat - x_T_hat + np.sin(psi)*l_e)**2
+            eq1 = r**2 -(z_T-l_w*np.cos(psi)-z_0)**2 - (x_0_hat - x_T_hat + np.sin(psi)*l_w)**2
             eq2 = r**2 -(l_d*np.cos(theta)-z_0)**2 - (x_0_hat - np.sin(theta)*l_d)**2
-            eq3 = np.tan(psi) - (z_T - z_0 - np.cos(psi)*l_e)/(x_0_hat - x_T_hat + np.sin(psi)*l_e)
+            eq3 = np.tan(psi) - (z_T - z_0 - np.cos(psi)*l_w)/(x_0_hat - x_T_hat + np.sin(psi)*l_w)
             eq4 = np.tan(theta) - (np.cos(theta)*l_d-z_0)/(x_0_hat-np.sin(theta)*l_d)
             return [eq1, eq2, eq3, eq4]
 
@@ -48,9 +195,9 @@ def solve_equ(z_T, x_T_hat, psi,  comments = False):
         if comments: print("Downwards bending")
         def equations(vars):
             z_0, x_0_hat, theta, r = vars
-            eq1 = r**2 -(z_0 - z_T + np.cos(psi)*l_e)**2 - (-x_0_hat + x_T_hat - np.sin(psi)*l_e)**2
+            eq1 = r**2 -(z_0 - z_T + np.cos(psi)*l_w)**2 - (-x_0_hat + x_T_hat - np.sin(psi)*l_w)**2
             eq2 = r**2 -(z_0 - np.cos(theta)*l_d)**2 - (-x_0_hat + np.sin(theta)*l_d)**2
-            eq3 = np.tan(psi) - (z_0 - (z_T - np.cos(psi)*l_e))/(-x_0_hat + x_T_hat - np.sin(psi)*l_e)
+            eq3 = np.tan(psi) - (z_0 - (z_T - np.cos(psi)*l_w))/(-x_0_hat + x_T_hat - np.sin(psi)*l_w)
             eq4 = np.tan(theta) - (z_0 - np.cos(theta)*l_d)/(-x_0_hat + np.sin(theta)*l_d)
             return [eq1, eq2, eq3, eq4]
 
@@ -86,21 +233,21 @@ def solve_equ(z_T, x_T_hat, psi,  comments = False):
                         initial_guesses.append([z_T*z_0_factor, x_T_hat*x_0_hat_factor, theta_factor, z_T*r_factor])
 
 
-    def sanity_checks_upwards(numerical_solution, psi, x_T_hat, z_T, l_d, l_e):
+    def sanity_checks_upwards(numerical_solution, psi, x_T_hat, z_T, l_d, l_w):
         """Perform sanity checks for upwards bending."""
         z_0, x_0_hat, theta, r = numerical_solution
-        eq1 = round(r**2 - (z_T - l_e * np.cos(psi) - z_0)**2 - (x_0_hat - x_T_hat + np.sin(psi) * l_e)**2, 3)
+        eq1 = round(r**2 - (z_T - l_w * np.cos(psi) - z_0)**2 - (x_0_hat - x_T_hat + np.sin(psi) * l_w)**2, 3)
         eq2 = round(r**2 - (l_d * np.cos(theta) - z_0)**2 - (x_0_hat - np.sin(theta) * l_d)**2, 3)
-        eq3 = round(np.tan(psi) - (z_T - z_0 - np.cos(psi) * l_e) / (x_0_hat - x_T_hat + np.sin(psi) * l_e), 3)
+        eq3 = round(np.tan(psi) - (z_T - z_0 - np.cos(psi) * l_w) / (x_0_hat - x_T_hat + np.sin(psi) * l_w), 3)
         eq4 = round(np.tan(theta) - (np.cos(theta) * l_d - z_0) / (x_0_hat - np.sin(theta) * l_d), 3)
         return eq1, eq2, eq3, eq4
 
-    def sanity_checks_downwards(numerical_solution, psi, x_T_hat, z_T, l_d, l_e):
+    def sanity_checks_downwards(numerical_solution, psi, x_T_hat, z_T, l_d, l_w):
         """Perform sanity checks for downwards bending."""
         z_0, x_0_hat, theta, r = numerical_solution
-        eq1 = round(r**2 - (z_0 - z_T + np.cos(psi) * l_e)**2 - (-x_0_hat + x_T_hat - np.sin(psi) * l_e)**2, 3)
+        eq1 = round(r**2 - (z_0 - z_T + np.cos(psi) * l_w)**2 - (-x_0_hat + x_T_hat - np.sin(psi) * l_w)**2, 3)
         eq2 = round(r**2 - (z_0 - np.cos(theta) * l_d)**2 - (-x_0_hat + np.sin(theta) * l_d)**2, 3)
-        eq3 = round(np.tan(psi) - (z_0 - (z_T - np.cos(psi) * l_e)) / (-x_0_hat + x_T_hat - np.sin(psi) * l_e), 3)
+        eq3 = round(np.tan(psi) - (z_0 - (z_T - np.cos(psi) * l_w)) / (-x_0_hat + x_T_hat - np.sin(psi) * l_w), 3)
         eq4 = round(np.tan(theta) - (z_0 - np.cos(theta) * l_d) / (-x_0_hat + np.sin(theta) * l_d), 3)
         return eq1, eq2, eq3, eq4
 
@@ -121,29 +268,26 @@ def solve_equ(z_T, x_T_hat, psi,  comments = False):
                 
                 z_0, x_0_hat, theta, r = numerical_solution
 
-                # Check conditions I-III
-                # condition I
+                # Check constraints
                 if not (MIN_THETA <= theta <= MAX_THETA):
                     if comments: print(f"Theta = {round(np.rad2deg(theta))} deg out of bounds --> next try")
                     continue
 
-                # condition II
                 if psi < theta_straight_config and theta < theta_straight_config:  # Downwards bending
                     if comments: print("Theta too small for downwards bending --> next try")
                     continue
 
-                # condition III
-                if psi > theta_straight_config and np.sin(theta) * l_d > x_T_hat - np.sin(psi) * l_e:  # Upwards bending
+                if psi > theta_straight_config and np.sin(theta) * l_d > x_T_hat - np.sin(psi) * l_w:  # Upwards bending
                     if comments: print("Distal part too high --> next try")
                     continue
 
                 # Sanity checks
                 if psi > theta_straight_config:  # Upwards bending
-                    eqs = sanity_checks_upwards(numerical_solution, psi, x_T_hat, z_T, l_d, l_e)
+                    eqs = sanity_checks_upwards(numerical_solution, psi, x_T_hat, z_T, l_d, l_w)
                 else:  # Downwards bending
-                    eqs = sanity_checks_downwards(numerical_solution, psi, x_T_hat, z_T, l_d, l_e)
+                    eqs = sanity_checks_downwards(numerical_solution, psi, x_T_hat, z_T, l_d, l_w)
 
-                if all(abs(eq) < 1e-6 for eq in eqs):
+                if all(eq == 0 for eq in eqs):
                     if comments: print("Sanity checks passed!")
                     break
                 else:
@@ -166,7 +310,8 @@ def solve_equ(z_T, x_T_hat, psi,  comments = False):
     if comments: print("Number of iterations until solution: ", it_counter, "/", len(initial_guesses))
     if it_counter == len(initial_guesses):
         if comments: print("Iterated through all initial guesses but no solution found!")
-        return [0,0,0], time_needed, numerical_solution
+        X_e_hat = [0, 0, 0]  # No solution found
+        return X_e_hat, time_needed, numerical_solution
                 
     
     numerical_solution[2] = numerical_solution[2]%(2*np.pi) # angle in the range of 0 to 2pi
@@ -180,25 +325,23 @@ def solve_equ(z_T, x_T_hat, psi,  comments = False):
     x_e_hat = 0
             
     if 0 < psi < theta_straight_config: #downward bending & in this case z_0 is to the right of the circle end point where it connects to the wrist
-        z_e_hat = np.cos(theta)*l_d + np.sin(theta)*r - np.sin(abs(psi))*r + np.cos(psi)*l_e
-        x_e_hat = np.sin(theta)*l_d - np.cos(theta)*r + np.cos(psi)*r + np.sin(psi)*l_e # for psi < 0 --> sin(psi) = - sin(abs(psi))
+        z_e_hat = np.cos(theta)*l_d + np.sin(theta)*r - np.sin(abs(psi))*r + np.cos(psi)*l_w
+        x_e_hat = np.sin(theta)*l_d - np.cos(theta)*r + np.cos(psi)*r + np.sin(psi)*l_w # for psi < 0 --> sin(psi) = - sin(abs(psi))
     if psi < 0: #downward bending & in this case z_0 is to the left of the circle end point where it connects to the wrist
-        z_e_hat = np.cos(theta)*l_d + np.sin(theta)*r + np.sin(abs(psi))*r + np.cos(psi)*l_e
-        x_e_hat = np.sin(theta)*l_d - np.cos(theta)*r + np.cos(psi)*r + np.sin(psi)*l_e # for psi < 0 --> sin(psi) = - sin(abs(psi))
+        z_e_hat = np.cos(theta)*l_d + np.sin(theta)*r + np.sin(abs(psi))*r + np.cos(psi)*l_w
+        x_e_hat = np.sin(theta)*l_d - np.cos(theta)*r + np.cos(psi)*r + np.sin(psi)*l_w # for psi < 0 --> sin(psi) = - sin(abs(psi))
     if psi > theta_straight_config: # upwards bending
-        z_e_hat = np.cos(theta)*l_d - np.sin(theta)*r + np.sin(psi)*r + np.cos(psi)*l_e
-        x_e_hat = np.sin(theta)*l_d + np.cos(theta)*r - np.cos(psi)*r + np.sin(psi)*l_e
+        z_e_hat = np.cos(theta)*l_d - np.sin(theta)*r + np.sin(psi)*r + np.cos(psi)*l_w
+        x_e_hat = np.sin(theta)*l_d + np.cos(theta)*r - np.cos(psi)*r + np.sin(psi)*l_w
         
         #there is no way to determine psi from the numerical solution
 
     X_e_hat = [z_e_hat, x_e_hat, psi]
-
     
     return X_e_hat, time_needed, numerical_solution
         
 
-
-def get_motor_commands_from_geo_numerical_solution(numerical_solution, X_d_hat_array):
+def get_robot_length_from_NSGC_solution(numerical_solution, X_d_hat_array):
 
     psi_t = X_d_hat_array[2]
     theta_straight_config = np.arctan(X_d_hat_array[1]/X_d_hat_array[0])  # for straight configuration
@@ -223,55 +366,81 @@ def get_motor_commands_from_geo_numerical_solution(numerical_solution, X_d_hat_a
     if psi_t < theta_straight_config and psi_t >= 0: # downwards bending with 0 < psi < psi_t	
         l_r = (r-dist_connectors_2_neutral_axis)*(theta-psi_t) #it is impossible that psi_t>theta for downwards bending
         delta_l_niti = (r+dist_niti_2_neutral_axis)*(theta-psi_t)-l_r
+
+    return l_r, delta_l_niti #compensated_robotic_length, compensated_delta_l_niTi
+
+
+def NSGC_API (X_t, image_number): #X_t is the target pose in the form of [x, y, z, psi] in mm and rad       
+        #X_t = np.array([10  , 20 , 300  , np.deg2rad(-20)]) #coordinates as defined in the paper!
+        x_t =   round(X_t[0],2) # target coordinate along the x axis in mm
+        y_t =   round(X_t[1],2) # target coordinate along the y axis in mm
+        z_t =   round(X_t[2],2) # target coordinate along the z axis in mm
+        psi_t = round(X_t[3],3) # orientation at the target position about y_rotated axis in rad
+
+        x_t_hat = np.sqrt(x_t**2 + y_t**2)  # target position in the rotated coordinate system
+        alpha = np.arctan2(y_t, x_t) 
+        print("alpha: ", alpha)
+
+        X_e_hat, _, numerical_solution = NSGC(z_t, x_t_hat, psi_t, comments = True)
         
+        if X_e_hat[0] == 0 and X_e_hat[1] == 0 and X_e_hat[2] == 0: #if there in no numerical solution
+            print("x_t_hat is made negative ---------------------------------------------------------------")
+            x_t_hat = -x_t_hat
+            X_e_hat, _, numerical_solution = NSGC(z_t, x_t_hat, psi_t, comments = True)
+            X_actual = np.array([X_e_hat[1]*np.cos(alpha+np.pi), X_e_hat[1]*np.sin(alpha+np.pi), X_e_hat[0], X_e_hat[2]]) #rotate back to the original coordinate system
 
-    compensated_robotic_length = l_r + (theta * dist_rot_axis_2_connectors)
-    compensated_delta_l_niTi = delta_l_niti + (theta*dist_rot_axis_2_niti)
+        else:
+            X_actual = np.array([X_e_hat[1]*np.cos(alpha), X_e_hat[1]*np.sin(alpha), X_e_hat[0], X_e_hat[2]])
+        
+        z_0 = numerical_solution[0]
+        x_0_hat = numerical_solution[1]
+        theta = numerical_solution[2] # angle in the range of 0 to 2pi
+        r = numerical_solution[3] 
 
-    #print("robotic_length compensated: ", compensated_robotic_length, "mm")
-    #print("theta: ", np.rad2deg(theta), "deg")
-    #print("delta_l_niTi compensated: ", compensated_delta_l_niTi, "mm")
-
-    return compensated_robotic_length, compensated_delta_l_niTi
-
+        X_t_hat = np.array([z_t, x_t_hat, psi_t])
+        # print("X_t_hat: ", z_t, x_t_hat, np.rad2deg(psi_t))
+        # print("X_e_hat: ", X_e_hat[0], X_e_hat[1], np.rad2deg(X_e_hat[2]))
+        # print("X_t: ", X_t[0], X_t[1], X_t[2], np.rad2deg(X_t[3]))
+        # print("X_actual: ", X_actual[0], X_actual[1], X_actual[2], np.rad2deg(X_actual[3]))
+        # print("Distance: ", np.linalg.norm(np.array(X_t- X_actual)))
+        # print("numerical_solution: z_0:", round(z_0, 3), ", x_0_hat:", round(x_0_hat, 3), ", theta in deg:", round(np.rad2deg(theta), 3), ", r:", round(r, 3 ))
+    
+        if X_e_hat[0] == 0 and X_e_hat[1] == 0 and X_e_hat[2] == 0: #if there in no numerical solution
+            print("No solution found for the given target pose.")
+            return
+        
+        l_r, delta_l_niti = get_robot_length_from_NSGC_solution(numerical_solution, X_t_hat)
+        robot_parameters = np.array([alpha, theta, l_r, delta_l_niti])
+        plot_3D(X_t, robot_parameters, image_number)
 
 
 if __name__ == "__main__":
+   
+    #Define path for use case
+    step_size = 1
     
-    # User input  X_d = [x_t, y_t, z_t, psi_t] with x_t, y_t, z_t in mm and psi_t in deg 
-    X_d = np.array([50, 70 ,400  , np.deg2rad(65) ]) # target position in the original coordinate system
-    x_t =   round(X_d[0],2) # target coordinate in global x
-    y_t =   round(X_d[1],2) # target coordinate in global y
-    z_t =   round(X_d[2],2) # target coordinate in global z
-    psi_t = round(X_d[3],3) # orientation at the target position about y_rotated axis (local)
+    trajectory_list = []
+    for i in range(-25, 25, step_size):
+        trajectory_list.append(np.array([i, -25, 250, np.deg2rad(-30)]))
 
-    x_t_hat = np.sqrt(x_t**2 + y_t**2)  # target position in the rotated coordinate system
-    print("x_t_hat: ", x_t_hat)
-    alpha = np.arctan2(y_t, x_t) 
-    
-    X_e_hat, _, numerical_solution = solve_equ(z_t, x_t_hat, psi_t, comments = False)
-    if X_e_hat[0] == 0 and X_e_hat[1] == 0 and X_e_hat[2] == 0: #if there in no numerical solution
-        print("x_t_hat is made negative ---------------------------------------------------------------")
-        x_t_hat = -x_t_hat
-        psi_t = -psi_t
-        X_e_hat, _, numerical_solution = solve_equ(z_t, x_t_hat, psi_t, comments = False)
-        X_e_geo = np.array([X_e_hat[1]*np.cos(alpha+np.pi), X_e_hat[1]*np.sin(alpha+np.pi), X_e_hat[0], X_e_hat[2]]) #rotate back to the original coordinate system
-        alpha = alpha + np.pi
-    else:
-        X_e_geo = np.array([X_e_hat[1]*np.cos(alpha), X_e_hat[1]*np.sin(alpha), X_e_hat[0], X_e_hat[2]])
-    
-    print("alpha: ", np.rad2deg(alpha))
-    print("X_d_hat: ", z_t, x_t_hat, np.rad2deg(psi_t))
-    print("X_e_hat: ", X_e_hat[0], X_e_hat[1], np.rad2deg(X_e_hat[2]))
-    print("X_d: ", X_d[0], X_d[1], X_d[2], np.rad2deg(X_d[3]))
-    print("X_e_geo: ", X_e_geo[0], X_e_geo[1], X_e_geo[2], np.rad2deg(X_e_geo[3]))
-    print("Distance: ", np.linalg.norm(np.array(X_d- X_e_geo)))
-    print("numerical_solution: z_0:", round(numerical_solution[0], 3), ", x_0_hat:", round(numerical_solution[1], 3), ", theta in deg:", round(np.rad2deg(numerical_solution[2]), 3), ", r:", round(numerical_solution[3], 3 ))
-    
-    
-    #theta_straight_config = np.arctan2(x_t_hat,z_t)
-    #get_motor_commands_from_geo_numerical_solution(numerical_solution, theta_straight_config)
-    
+    for i in range(-25, 25, step_size):
+        trajectory_list.append(np.array([25, i, 250, np.deg2rad(-50)]))
+
+    for i in range(-50, -30, step_size):
+        trajectory_list.append(np.array([25, 25, 250, np.deg2rad(i)]))
+
+    for i in range(250, 280, step_size):
+        trajectory_list.append(np.array([25, 25, i, np.deg2rad(-30)]))
+
+    for i in range(-30, -20, step_size):
+        trajectory_list.append(np.array([25, 25, 280, np.deg2rad(i)]))
 
 
-
+    image_number = 0
+    for i in range(len(trajectory_list)):
+        image_number +=1
+        print(i, "of", len(trajectory_list))
+        NSGC_API(trajectory_list[i], image_number)
+    
+    
+  
