@@ -4,9 +4,8 @@
 import numpy as np
 from visualization_functions import *
 import time
-import time
 from scipy.spatial.transform import Rotation as R
-from solve_set_equations import *
+from NSGC import *
 import cvxpy as cp
 
 
@@ -793,12 +792,12 @@ if __name__ == "__main__":
             z_t_NSGC = x_t
             psi_t_NSGC = psi_z_desired
 
-            X_e_hat_NSGC_first_try, time_needed_NSGC_first_try, num_sol_first_try  = solve_NSGC(z_t_NSGC, x_t_hat_NSGC, psi_t_NSGC) # returns X_e_hat, time_needed, numerical solution 
+            X_e_hat_NSGC_first_try, time_needed_NSGC_first_try, num_sol_first_try  = NSGC(z_t_NSGC, x_t_hat_NSGC, psi_t_NSGC) # returns X_e_hat, time_needed, numerical solution 
             # X_e_hat = [z_e_hat, x_e_hat, psi]
             # if the set of equations did not find solution -> return X_e_hat=[0,0,0]
             # if the configuration is straight, the numerical solution will be [0,0,0,0]
             if np.array_equal(X_e_hat_NSGC_first_try, [0,0,0]): #if there in no numerical solution
-                X_e_hat_NSGC_second_try, time_needed_NSGC_second_try, num_sol_second_try = solve_NSGC(z_t, -x_t_hat_NSGC, psi_t_NSGC)
+                X_e_hat_NSGC_second_try, time_needed_NSGC_second_try, num_sol_second_try = NSGC(z_t, -x_t_hat_NSGC, psi_t_NSGC)
                 
                 if np.array_equal(X_e_hat_NSGC_second_try, [0,0,0]):
                     convergence_overview_array[i,8] = 1
